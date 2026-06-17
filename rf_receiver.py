@@ -21,19 +21,21 @@ receiver, and you can run any action when it fires.
 
 Hardware
 --------
-  433 MHz receiver module
-    DATA -> GPIO 27 (BCM, physical pin 13)   [--pin to change]
+  433 MHz receiver module (tested with a HopeRF RFM210LH; the very cheap
+  XY-MK-5V / MX-RM-5V modules did not work in my testing)
+    DOUT -> GPIO 27 (BCM, physical pin 13)   [--pin to change]
     VCC  -> 3.3V (pin 1)   <- do NOT feed 5V into a GPIO
     GND  -> GND  (pin 6)
-  Soldering a ~17 cm wire as an antenna dramatically improves range.
+    ANT  -> a single ~17 cm jumper/dupont wire (the RFM210 has a header pin
+            for this, so no soldering needed)
 
 Install
 -------
   pip install pigpio broadlink
-  sudo systemctl enable --now pigpiod
+  sudo pigpiod      # start the pigpio helper (once per boot)
 
-Quick start (no hardware needed)
---------------------------------
+Self-test (no hardware, fakes the pulses in software)
+-----------------------------------------------------
   python3 examples/offline_demo.py
 
 Real usage

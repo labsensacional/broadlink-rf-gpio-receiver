@@ -1,86 +1,94 @@
 # broadlink-rf-gpio-receiver
 
-Detect cheap **433/315 MHz OOK remotes, doorbells and sensors** with a $2 GPIO
-receiver on a Raspberry Pi — using signals you already learned with a
-**Broadlink RM** as the reference.
+**Make your Raspberry Pi react when you press a cheap 433 MHz remote or doorbell.**
 
-A Broadlink RM4 Pro can *learn and replay* RF, but it can't tell you when a
-button is pressed. A cheap receiver module can hear the button, but only gives
-you a noisy stream of raw edges with no "code" to read. This bridges the two:
-it turns a Broadlink capture into a bit signature and matches it live against
-the receiver's edges, so a learned remote becomes an **event you can act on**.
+Lots of cheap gadgets use little 433 MHz radio remotes: doorbells, garage
+buttons, RGB strip remotes, PIR motion/door sensors. A **Broadlink RM** (a smart
+IR/RF blaster) can *record* and *replay* those signals — but it can't tell you
+the moment someone presses the button. A **cheap 433 MHz receiver chip** wired
+to your Pi *can* hear the button, but on its own it just hears a messy stream of
+radio static with the signal buried inside, and has no idea what it means.
 
-Handy for: doorbell → phone notification, extra remote buttons → run a script,
-PIR/door sensors → home automation, etc.
+This little Python script connects the two: you record a button once with the
+Broadlink, and the script teaches your Pi to recognize *"hey, that was the
+doorbell!"* whenever the cheap receiver hears it again — so your Pi can run
+anything you want in response (ping your phone, turn on a light, log it, ...).
 
-## How it works
+## What you need
 
-```
-Broadlink capture (hex)  ──►  pulses  ──►  24-bit signature (PT2262/EV1527)
-                                                     │
-433 MHz receiver on GPIO  ──►  raw edges  ──►  match ┘  ──►  on_match(key) ──► action
-```
+- A **Raspberry Pi**.
+- A **433 MHz receiver module**. I tested it with a **HopeRF RFM210LH**
+  (sold as *"Rfm210 Subghz Hoperf 433mhz Raw Th"*) and it worked well. I also
+  tried the very cheap **XY-MK-5V** and **MX-RM-5V** modules and couldn't get
+  them to work — not sure if it was them or me, but the RFM210 was painless.
+- A **Broadlink RM** (RM4 Pro / RM Pro) to record your remotes once.
 
-The matcher tolerates the realities of cheap receivers: continuous noise at
-rest, AGC garbage before the packet, dropped leading bits, and per-edge timing
-jitter. See [`docs/broadlink_to_gpio.md`](docs/broadlink_to_gpio.md) for the
-full decoding pipeline.
-
-## Try it in 5 seconds (no hardware)
-
-```bash
-python3 examples/offline_demo.py
-```
-
-It synthesizes two fake remotes, decodes them back to bits, then recognizes a
-noisy, partial reception of one of them — the exact path the GPIO receiver uses
-live.
-
-## Hardware
+## Wiring (RFM210LH)
 
 ```
-433 MHz receiver module (RFM210LH-D, XY-MK-5V, MX-RM-5V, ...)
-  DATA  -> GPIO 27   (BCM, physical pin 13)     # change with --pin
-  VCC   -> 3.3V      (pin 1)   <- do NOT feed 5V into a GPIO
-  GND   -> GND       (pin 6)
+RFM210LH        Raspberry Pi
+  DOUT  ----->  GPIO 27 (physical pin 13)   # change with --pin
+  VCC   ----->  3.3V    (pin 1)             # NOT 5V: the GPIO isn't 5V tolerant
+  GND   ----->  GND     (pin 6)
+  ANT   ----->  one ~17 cm jumper wire (this is your antenna)
 ```
 
-Solder a ~17 cm straight wire to the module's antenna pad for usable range.
+The RFM210 has a header/dupont pin for the antenna, so you can just plug a
+dupont cable into it and let it dangle — no soldering. Range is much better
+with it than without.
 
 ## Install
 
 ```bash
 pip install pigpio broadlink
-sudo systemctl enable --now pigpiod
+sudo pigpiod        # start the pigpio helper (once per boot)
 ```
 
-## Usage
+## Self-test without any hardware (optional)
+
+Just want to see the matching logic work, or sanity-check your install?
 
 ```bash
-# Inspect a Broadlink codes.json and the derived signatures
-python3 rf_code_info.py --codes codes.example.json
+python3 examples/offline_demo.py
+```
 
-# List loaded signals
-python3 rf_receiver.py --list --codes codes.example.json
+This **fakes** the radio pulses in software — no Pi, no receiver, no Broadlink —
+and shows the decode + match step the script normally does live. It's only a
+demo of the brains; the real thing below needs the hardware.
 
-# Debug: print every frame the receiver decodes (find/learn new remotes)
+## Real usage
+
+**1. Record each remote button once** with your Broadlink into a `codes.json`:
+
+```json
+{ "doorbell": { "button": "<broadlink hex packet>" } }
+```
+
+Any Broadlink "learn" tool produces this format. (`codes.example.json` is a fake
+sample so the commands below run immediately.)
+
+**2. See what loaded** and the signature derived for each button:
+
+```bash
+python3 rf_code_info.py --codes codes.json
+python3 rf_receiver.py --list --codes codes.json
+```
+
+**3. Listen.** Debug mode prints every frame it decodes — use it to confirm your
+remote is actually being heard:
+
+```bash
 python3 rf_receiver.py --codes codes.json
+```
 
-# Daemon: run an action when a known signal is detected
+**4. Run actions** when a known button is detected. Edit the `ACTIONS` dict at
+the top of `rf_receiver.py`, then:
+
+```bash
 python3 rf_receiver.py --daemon --codes codes.json
 ```
 
-`codes.json` is whatever your Broadlink learn tool produces:
-
-```json
-{ "device name": { "button name": "<broadlink hex packet>" } }
-```
-
-(`codes.example.json` is a synthetic file so the commands above work out of the
-box.) Wire up reactions by editing the `ACTIONS` dict at the top of
-`rf_receiver.py` — values can be a `subprocess` arg list or a Python callable.
-
-## Example: doorbell → notification
+### Example: doorbell → notification
 
 ```python
 # rf_receiver.py
@@ -89,17 +97,27 @@ ACTIONS = {
 }
 ```
 
-```bash
-python3 rf_receiver.py --daemon
-```
+## How it works (short version)
+
+- A Broadlink capture is turned into a list of pulse lengths, and from that a
+  24-bit "fingerprint" of the button. (These remotes use PT2262/EV1527 chips
+  that send a fixed code.)
+- The cheap receiver spits out a noisy stream of pulse edges all the time. The
+  script watches that stream and, whenever a chunk matches a known fingerprint
+  closely enough, fires `on_match`.
+- It's built to cope with the messiness of cheap receivers: constant background
+  noise, garbage before the real signal, and a few dropped/uncertain bits.
+
+Full write-up: [`docs/broadlink_to_gpio.md`](docs/broadlink_to_gpio.md).
 
 ## Notes
 
-- The receiver emits noise continuously; never treat raw GPIO activity as a
-  press. Act only on `on_match`.
-- Works with PT2262/EV1527-style fixed-code remotes (most cheap ones). Rolling
-  codes are intentionally not matchable.
-- Real remotes repeat the code several times per press; the matcher uses that.
+- The receiver chip is *always* emitting noise; never treat raw GPIO activity as
+  a button press. Only act on `on_match`.
+- Works with fixed-code remotes (PT2262/EV1527 — most cheap ones). Rolling-code
+  remotes can't be matched, by design.
+- Real remotes send their code several times per press; the matcher relies on
+  that.
 
 ## License
 
