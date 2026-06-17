@@ -23,6 +23,13 @@ anything you want in response (ping your phone, turn on a light, log it, ...).
   them to work — not sure if it was them or me, but the RFM210 was painless.
 - A **Broadlink RM** (RM4 Pro / RM Pro) to record your remotes once.
 
+<p>
+  <img src="docs/images/rfm210.jpg" alt="HopeRF RFM210LH 433 MHz superheterodyne receiver module" width="380">
+  <img src="docs/images/broadlink-rm4-pro.jpg" alt="Broadlink RM4 Pro IR/RF blaster" width="230">
+</p>
+
+<sub>Left: the HopeRF RFM210LH receiver (note the two header rows — antenna/power on one side, data on the other). Right: a Broadlink RM4 Pro, used once to record each remote.</sub>
+
 ## Wiring (RFM210LH)
 
 ```
